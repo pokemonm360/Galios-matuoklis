@@ -1,0 +1,3 @@
+#define ADC_ADRRESS        0b1100101
+#define IO_EXPANDER_ADRESS 0b0100111
+
