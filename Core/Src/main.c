@@ -142,40 +142,73 @@ extern uint8_t u8x8_stm32_gpio_and_delay(u8x8_t *u8x8, uint8_t msg, uint8_t arg_
 extern uint8_t u8x8_byte_stm32_hw_i2c(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int, void *arg_ptr); //Reikia OLED ekranui
 static u8g2_t u8g2; //Reikia OLED ekranui
 
+#include "stm32l0xx_hal_flash_ex.h"  // Reikalinga flash atminties rasymui
+#include "string.h"
 
-#include "stm32l0xx_hal_flash_ex.h"  //Reikalinga flash atminties rasymui
+#define FLASH_USER_PAGE_ADDR   (FLASH_BASE + FLASH_SIZE - FLASH_PAGE_SIZE)
 
-#define FLASH_USER_PAGE_ADDR   (FLASH_BASE + FLASH_SIZE - FLASH_PAGE_SIZE) //Reikalinga flash atminties rasymui
-
-void SaveDefaultsToFlash(void) { //Funkcija issaugoti duomenis i flash atminti
+void SaveDefaultsToFlash(void) {
     FLASH_EraseInitTypeDef EraseInit = {0};
     uint32_t PageError;
 
+    // 1) Unlock & clear flags
     HAL_FLASH_Unlock();
+    HAL_UART_Transmit(&huart2, (uint8_t*)"FLASH Unlock\r\n", strlen("FLASH Unlock\r\n"), 100);
+    __HAL_FLASH_CLEAR_FLAG(
+        FLASH_FLAG_EOP    |
+        FLASH_FLAG_WRPERR |
+        FLASH_FLAG_PGAERR
+    );
+    HAL_UART_Transmit(&huart2, (uint8_t*)"Flags cleared\r\n", strlen("Flags cleared\r\n"), 100);
 
-    // Erase exactly one page at FLASH_USER_PAGE_ADDR
+    // 2) Erase page
     EraseInit.TypeErase   = FLASH_TYPEERASE_PAGES;
-    EraseInit.PageAddress = FLASH_USER_PAGE_ADDR; 
+    EraseInit.PageAddress = FLASH_USER_PAGE_ADDR;
     EraseInit.NbPages     = 1;
+    HAL_UART_Transmit(&huart2, (uint8_t*)"Erasing page...\r\n", strlen("Erasing page...\r\n"), 100);
 
-    // Pack your defaults into 3 words
+    if (HAL_FLASHEx_Erase(&EraseInit, &PageError) == HAL_OK) {
+        HAL_UART_Transmit(&huart2, (uint8_t*)"Erase OK\r\n", strlen("Erase OK\r\n"), 100);
+    } else {
+        HAL_UART_Transmit(&huart2, (uint8_t*)"Erase ERR\r\n", strlen("Erase ERR\r\n"), 100);
+    }
+
+    // 3) Pack your defaults into 3 words
     uint32_t word0 =  (uint32_t)default_KIEKIS1
                     | ((uint32_t)default_KIEKIS2 << 8)
                     | ((uint32_t)default_MATAVIMAS << 16);
-
     uint32_t word1 =  (uint32_t)default_OLED
                     | ((uint32_t)default_PC << 16);
-
     uint32_t word2 =  (uint32_t)INA219_1_ADDRESS
                     | ((uint32_t)INA219_2_ADDRESS << 8);
-
     uint32_t addr = FLASH_USER_PAGE_ADDR;
-    HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, addr,     word0);
-    HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, addr + 4, word1);
-    HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, addr + 8, word2);
 
+    // 4) Program word0
+    if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, addr, word0) == HAL_OK) {
+        HAL_UART_Transmit(&huart2, (uint8_t*)"Prog0 OK\r\n", strlen("Prog0 OK\r\n"), 100);
+    } else {
+        HAL_UART_Transmit(&huart2, (uint8_t*)"Prog0 ERR\r\n", strlen("Prog0 ERR\r\n"), 100);
+    }
+
+    // 5) Program word1
+    if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, addr + 4, word1) == HAL_OK) {
+        HAL_UART_Transmit(&huart2, (uint8_t*)"Prog1 OK\r\n", strlen("Prog1 OK\r\n"), 100);
+    } else {
+        HAL_UART_Transmit(&huart2, (uint8_t*)"Prog1 ERR\r\n", strlen("Prog1 ERR\r\n"), 100);
+    }
+
+    // 6) Program word2
+    if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, addr + 8, word2) == HAL_OK) {
+        HAL_UART_Transmit(&huart2, (uint8_t*)"Prog2 OK\r\n", strlen("Prog2 OK\r\n"), 100);
+    } else {
+        HAL_UART_Transmit(&huart2, (uint8_t*)"Prog2 ERR\r\n", strlen("Prog2 ERR\r\n"), 100);
+    }
+
+    // 7) Lock
     HAL_FLASH_Lock();
+    HAL_UART_Transmit(&huart2, (uint8_t*)"FLASH Locked\r\n", strlen("FLASH Locked\r\n"), 100);
 }
+
 
 void LoadDefaultsFromFlash(void) { //Funkcija nuskaityti numatytiems parametrams is atminties
     uint32_t *p = (uint32_t*)FLASH_USER_PAGE_ADDR;
@@ -330,6 +363,7 @@ uint8_t Dekodavimas(){ //Dekoduojame konfiguracini zodi is PC
   //01234567890123456789012345678901234567890123456789012345
 	//KIEKIS1=016;KIEKIS2=128;MATAVIMAS=0250;OLED=1000;PC=2000
 	//Toks zodis bus gaunamas is PC
+	__HAL_TIM_DISABLE_IT(&htim2, TIM_IT_UPDATE);
 	
 	if(RxBuferis[0] == 0x53 && RxBuferis[1] == 0x54 && RxBuferis[2] == 0x4F && RxBuferis[3] == 0x50){ //Patikriname ar yra "STOP" raides
 		STOP = 1;
@@ -338,6 +372,7 @@ uint8_t Dekodavimas(){ //Dekoduojame konfiguracini zodi is PC
 
 		for(int i = 0; i < UART_ZINUTES_ILGIS; i++) //Isvalome buferi
 			RxBuferis[i] = 0;
+		
 	}
 	
 	//Speciali komanda irasymui i flash
@@ -359,6 +394,8 @@ uint8_t Dekodavimas(){ //Dekoduojame konfiguracini zodi is PC
 		
 		for(int i = 0; i < UART_ZINUTES_ILGIS; i++) //Isvalome buferi
 			RxBuferis[i] = 0;
+		
+		
 	}
 	
 	else if(RxBuferis[0] == 0x4B){ //Patikriname ar pradine raide yra "K"
@@ -372,7 +409,10 @@ uint8_t Dekodavimas(){ //Dekoduojame konfiguracini zodi is PC
 		
 		for(int i = 0; i < UART_ZINUTES_ILGIS; i++) //Isvalome buferi
 			RxBuferis[i] = 0;
+			
 		}
+	
+		__HAL_TIM_ENABLE_IT(&htim2, TIM_IT_UPDATE);
 	
 	return 0;
 }
@@ -438,6 +478,10 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 				u8g2_ClearBuffer(&u8g2); //Isvalom ekrana
 				u8g2_SendBuffer(&u8g2);
 			}
+			
+			PC_laikas= PC/MATAVIMAS; 
+			OLED_laikas = OLED/MATAVIMAS;
+			MATAVIMO_laikas = MATAVIMAS/TIMER_INTERRUPT_TIME;
 			
 		//Tikriname ar galima vykdyti programa, ar bent viena konfiguracija teisinga (PC) ir ar laikas vykdyti matavima, 
 		// pagal tai ar praejo pakankamai laikmacio petraukciu. Tarkime, matavimai atliekami kas 1000 ms, laikmacio pertrauktis kas 250 ms,
@@ -620,6 +664,17 @@ int main(void)
 
   /* USER CODE BEGIN Init */
 	LoadDefaultsFromFlash(); //Nuskaitome numatytasias reiksmes is flash atminties
+	PC = default_PC;
+	OLED = default_OLED;
+	MATAVIMAS = default_MATAVIMAS;
+	KIEKIS1 = default_KIEKIS1;
+	KIEKIS2 = default_KIEKIS2;
+	PC_laikas= PC/MATAVIMAS; 
+	//apskaiciuojame, kiek matavimu telpa, kol reikia siusti info i PC. Pvz.: Jei siuntimas i PC kas 2000 ms, matavimas kas 250 ms, PC_laikas= 2000 ms/250 ms = 8
+	OLED_laikas = OLED/MATAVIMAS;
+	//apskaiciuojame, kiek matavimu telpa, kol reikia siusti info i OLED. Pvz.: Jei siuntimas i OLED kas 2000 ms, matavimas kas 250 ms, OLED_laikas = 2000 ms/250 ms = 8
+	MATAVIMO_laikas = MATAVIMAS/TIMER_INTERRUPT_TIME;
+	//apskaiciuojame, kiek laikmacio pertraukciu ivyksta, kol reikia matavimo. Pvz.: Jei matuojame kas 500 ms, o laikmatis sudirba kas 250 ms, MATAVIMO_laikas = 2
   /* USER CODE END Init */
 
   /* Configure the system clock */
